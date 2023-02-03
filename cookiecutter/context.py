@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import posix
 
 import codecs
 import collections
@@ -252,7 +253,7 @@ def load_context(json_object, verbose):
         value = prompt(variable, default)
 
         if verbose:
-            width, _ = click.get_terminal_size()
+            width, _ = posix.get_terminal_size()
             click.echo('-' * width)
 
         context[variable.name] = deserialize(value)
