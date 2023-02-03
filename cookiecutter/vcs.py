@@ -1,20 +1,18 @@
-# -*- coding: utf-8 -*-
-
 """Helper functions for working with version control systems."""
-
-from __future__ import unicode_literals
 import logging
 import os
-import subprocess
-import sys
+import subprocess  # nosec
+from pathlib import Path
+from shutil import which
+from typing import Optional
 
-from whichcraft import which
-
-from .exceptions import (
-    RepositoryNotFound, RepositoryCloneFailed, UnknownRepoType, VCSNotInstalled
+from cookiecutter.exceptions import (
+    RepositoryCloneFailed,
+    RepositoryNotFound,
+    UnknownRepoType,
+    VCSNotInstalled,
 )
-from .prompt import read_user_yes_no
-from .utils import make_sure_path_exists, rmtree
+from cookiecutter.utils import make_sure_path_exists, prompt_and_delete
 
 logger = logging.getLogger(__name__)
 
@@ -23,31 +21,6 @@ BRANCH_ERRORS = [
     'error: pathspec',
     'unknown revision',
 ]
-
-
-def prompt_and_delete_repo(repo_dir, no_input=False):
-    """Ask the user whether it's okay to delete the previously-cloned repo.
-
-    If yes, deletes it. Otherwise, Cookiecutter exits.
-
-    :param repo_dir: Directory of previously-cloned repo.
-    :param no_input: Suppress prompt to delete repo and just delete it.
-    """
-    # Suppress prompt if called via API
-    if no_input:
-        ok_to_delete = True
-    else:
-        question = (
-            "You've cloned {} before. "
-            "Is it okay to delete and re-clone it?"
-        ).format(repo_dir)
-
-        ok_to_delete = read_user_yes_no(question, 'yes')
-
-    if ok_to_delete:
-        rmtree(repo_dir)
-    else:
-        sys.exit()
 
 
 def identify_repo(repo_url):
@@ -83,17 +56,24 @@ def is_vcs_installed(repo_type):
     return bool(which(repo_type))
 
 
-def clone(repo_url, checkout=None, clone_to_dir='.', no_input=False):
+def clone(
+    repo_url: str,
+    checkout: Optional[str] = None,
+    clone_to_dir: "os.PathLike[str]" = ".",
+    no_input: bool = False,
+):
     """Clone a repo to the current directory.
 
     :param repo_url: Repo URL of unknown type.
     :param checkout: The branch, tag or commit ID to checkout after clone.
     :param clone_to_dir: The directory to clone to.
                          Defaults to the current directory.
-    :param no_input: Suppress all user prompts when calling via API.
+    :param no_input: Do not prompt for user input and eventually force a refresh of
+        cached resources.
+    :returns: str with path to the new directory of the repository.
     """
     # Ensure that clone_to_dir exists
-    clone_to_dir = os.path.expanduser(clone_to_dir)
+    clone_to_dir = Path(clone_to_dir).expanduser()
     make_sure_path_exists(clone_to_dir)
 
     # identify the repo_type
@@ -101,44 +81,53 @@ def clone(repo_url, checkout=None, clone_to_dir='.', no_input=False):
 
     # check that the appropriate VCS for the repo_type is installed
     if not is_vcs_installed(repo_type):
-        msg = "'{0}' is not installed.".format(repo_type)
+        msg = f"'{repo_type}' is not installed."
         raise VCSNotInstalled(msg)
 
     repo_url = repo_url.rstrip('/')
-    tail = os.path.split(repo_url)[1]
+    repo_name = os.path.split(repo_url)[1]
     if repo_type == 'git':
-        repo_dir = os.path.normpath(os.path.join(clone_to_dir,
-                                                 tail.rsplit('.git')[0]))
-    elif repo_type == 'hg':
-        repo_dir = os.path.normpath(os.path.join(clone_to_dir, tail))
-    logger.debug('repo_dir is {0}'.format(repo_dir))
+        repo_name = repo_name.split(':')[-1].rsplit('.git')[0]
+        repo_dir = os.path.normpath(os.path.join(clone_to_dir, repo_name))
+    if repo_type == 'hg':
+        repo_dir = os.path.normpath(os.path.join(clone_to_dir, repo_name))
+    logger.debug(f'repo_dir is {repo_dir}')
 
     if os.path.isdir(repo_dir):
-        prompt_and_delete_repo(repo_dir, no_input=no_input)
+        clone = prompt_and_delete(repo_dir, no_input=no_input)
+    else:
+        clone = True
 
-    try:
-        subprocess.check_output(
-            [repo_type, 'clone', repo_url],
-            cwd=clone_to_dir,
-            stderr=subprocess.STDOUT,
-        )
-        if checkout is not None:
-            subprocess.check_output(
-                [repo_type, 'checkout', checkout],
-                cwd=repo_dir,
+    if clone:
+        try:
+            subprocess.check_output(  # nosec
+                [repo_type, 'clone', repo_url],
+                cwd=clone_to_dir,
                 stderr=subprocess.STDOUT,
             )
-    except subprocess.CalledProcessError as clone_error:
-        if 'not found' in clone_error.output.lower():
-            raise RepositoryNotFound(
-                'The repository {} could not be found, '
-                'have you made a typo?'.format(repo_url)
-            )
-        if any(error in clone_error.output for error in BRANCH_ERRORS):
-            raise RepositoryCloneFailed(
-                'The {} branch of repository {} could not found, '
-                'have you made a typo?'.format(checkout, repo_url)
-            )
-        raise
+            if checkout is not None:
+                checkout_params = [checkout]
+                # Avoid Mercurial "--config" and "--debugger" injection vulnerability
+                if repo_type == "hg":
+                    checkout_params.insert(0, "--")
+                subprocess.check_output(  # nosec
+                    [repo_type, 'checkout', *checkout_params],
+                    cwd=repo_dir,
+                    stderr=subprocess.STDOUT,
+                )
+        except subprocess.CalledProcessError as clone_error:
+            output = clone_error.output.decode('utf-8')
+            if 'not found' in output.lower():
+                raise RepositoryNotFound(
+                    f'The repository {repo_url} could not be found, '
+                    'have you made a typo?'
+                ) from clone_error
+            if any(error in output for error in BRANCH_ERRORS):
+                raise RepositoryCloneFailed(
+                    f'The {checkout} branch of repository '
+                    f'{repo_url} could not found, have you made a typo?'
+                ) from clone_error
+            logger.error('git clone failed with error: %s', output)
+            raise
 
     return repo_dir
