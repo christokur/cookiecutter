@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPT = 'Please enter a value for "{variable.name}"'
 
-
 REGEX_COMPILE_FLAGS = {
     'ascii': re.ASCII,
     'debug': re.DEBUG,

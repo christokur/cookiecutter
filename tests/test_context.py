@@ -55,10 +55,71 @@ def load_cookiecutter(cookiecutter_file):
     return context
 
 
+def context_data_check():
+    context_all_reqs = (
+        {
+            'cookiecutter_context': OrderedDict(
+                [
+                    ("name", "cookiecutter-pytest-plugin"),
+                    ("cookiecutter_version", "2.0.0"),
+                    ("variables", []),
+                ]
+            )
+        },
+        True,
+    )
+
+    context_missing_name = (
+        {
+            'cookiecutter_context': OrderedDict(
+                [("cookiecutter_version", "2.0.0"), ("variables", [])]
+            )
+        },
+        False,
+    )
+
+    context_missing_cookiecutter_version = (
+        {
+            'cookiecutter_context': OrderedDict(
+                [("name", "cookiecutter-pytest-plugin"), ("variables", [])]
+            )
+        },
+        False,
+    )
+
+    context_missing_variables = (
+        {
+            'cookiecutter_context': OrderedDict(
+                [
+                    ("name", "cookiecutter-pytest-plugin"),
+                    ("cookiecutter_version", "2.0.0"),
+                ]
+            )
+        },
+        False,
+    )
+
+    yield context_all_reqs
+    yield context_missing_name
+    yield context_missing_cookiecutter_version
+    yield context_missing_variables
+
+
+@pytest.mark.usefixtures('clean_system')
+@pytest.mark.parametrize('input_params, expected_result', context_data_check())
+def test_context_check(input_params, expected_result):
+    """
+    Test that a context with the required fields will be detected as a
+    v2 context.
+    """
+    assert context.context_is_version_2(**input_params) == expected_result
+
+
 @pytest.mark.usefixtures('clean_system')
 def test_load_context_defaults():
 
     cc = load_cookiecutter('tests/test-context/cookiecutter.json')
+
     cc_cfg = context.load_context(cc['cookiecutter'], no_input=True)
 
     assert cc_cfg['full_name'] == 'Raphael Pierzina'
@@ -481,6 +542,41 @@ def test_variable_validation_bad_type():
         )
 
 
+def test_variable_invalid_type_exception():
+
+    with pytest.raises(ValueError) as excinfo:
+        context.Variable(name='badtype', default=None, type='color')
+
+    assert 'Variable: badtype has an invalid type color' in str(excinfo.value)
+
+
+def test_variable_invalid_validation_control_flag_is_logged_and_removed(caplog):
+
+    with caplog.at_level(logging.INFO):
+        v = context.Variable(
+            'module_name',
+            "{{cookiecutter.plugin_name|lower|replace('-','_')}}",
+            prompt="Please enter a name for your base python module",
+            type='string',
+            validation='^[a-z_]+$',
+            validation_flags=[
+                'ignorecase',
+                'forget',
+            ],
+            hide_input=True,
+        )
+
+        for record in caplog.records:
+            assert record.levelname == 'WARNING'
+
+        assert (
+            "Variable: module_name - Ignoring unkown RegEx validation Control Flag named 'forget'"
+            in caplog.text
+        )
+
+        assert v.validation_flag_names == ['ignorecase']
+
+
 def test_variable_defaults_to_no_prompt_for_private_variable_names():
     v = context.Variable(
         '_private_variable_name',
@@ -542,6 +638,28 @@ def test_variable_str():
         assert "validate='<_sre.SRE_Pattern object at" in v_str
 
 
+def test_variable_option_raise_invalid_type_value_error():
+
+    VAR_NAME = 'module_name'
+    OPT_VALUE_OF_INCORRECT_TYPE = 12  # should be a string
+
+    with pytest.raises(ValueError) as excinfo:
+        context.Variable(
+            VAR_NAME,
+            "{{cookiecutter.plugin_name|lower|replace('-','_')}}",
+            prompt="Please enter a name for your base python module",
+            type='string',
+            validation=OPT_VALUE_OF_INCORRECT_TYPE,
+            validation_flags=['ignorecase'],
+            hide_input=True,
+        )
+
+    msg = "Variable: '{var_name}' Option: 'validation' requires a value of type str, but has a value of: {value}"
+    assert msg.format(var_name=VAR_NAME, value=OPT_VALUE_OF_INCORRECT_TYPE) in str(
+        excinfo.value
+    )
+
+
 def test_cookiecutter_template_repr():
     #  name, cookiecutter_version, variables, **info
 
@@ -568,6 +686,26 @@ def test_load_context_with_input_chioces(mocker):
 
     assert cc_cfg['full_name'] == input_1
     assert cc_cfg['email'] == input_2
+
+
+def test_load_context_with_input_choices_no_verbose(mocker):
+    cc = load_cookiecutter('tests/test-context/cookiecutter_choices.json')
+
+    INPUT_1 = 'E.R. Uber'
+    INPUT_2 = 'eruber@gmail.com'
+    INPUT_3 = '2'  # 'MIT'
+    mocker.patch(
+        'click.termui.visible_prompt_func',
+        autospec=True,
+        side_effect=[INPUT_1, INPUT_2, INPUT_3],
+    )
+
+    cc_cfg = context.load_context(
+        cc['cookiecutter_choices'], no_input=False, verbose=False
+    )
+
+    assert cc_cfg['full_name'] == INPUT_1
+    assert cc_cfg['email'] == INPUT_2
     assert cc_cfg['license'] == 'MIT'
 
 
@@ -667,3 +805,35 @@ def test_load_context_bad_cc_version():
     cc['cookiecutter']['requires']['cookiecutter'] = '2, >2.0'
     with pytest.raises(IncompatibleVersion):
         context.load_context(cc['cookiecutter'], no_input=True)
+
+
+def test_specify_if_yes_skip_to_without_yes_no_type():
+    """
+    Test ValueError is raised when a variable specifies an if_yes_skip_to
+    field and the variable type is not 'yes+no'
+    """
+    with pytest.raises(ValueError) as excinfo:
+        context.Variable(
+            name='author', default='JKR', type='string', if_yes_skip_to='roman'
+        )
+
+    assert (
+        "Variable: 'author' specifies 'if_yes_skip_to' field, but variable not of type 'yes_no'"
+        in str(excinfo.value)
+    )
+
+
+def test_specify_if_no_skip_to_without_yes_no_type():
+    """
+    Test ValueError is raised when a variable specifies an if_no_skip_to
+    field and the variable type is not 'yes+no'
+    """
+    with pytest.raises(ValueError) as excinfo:
+        context.Variable(
+            name='author', default='JKR', type='string', if_no_skip_to='roman'
+        )
+
+    assert (
+        "Variable: 'author' specifies 'if_no_skip_to' field, but variable not of type 'yes_no'"
+        in str(excinfo.value)
+    )
