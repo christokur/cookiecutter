@@ -68,6 +68,9 @@ def apply_overwrites_to_context(context, overwrite_context):
                     "{} provided for choice variable {}, but the "
                     "choices are {}.".format(overwrite, variable, context_value)
                 )
+        elif isinstance(context_value, dict) and isinstance(overwrite, dict):
+            # We are dealing with a nested context
+            apply_overwrites_to_context(context[variable], overwrite)
         else:
             # Simply overwrite the value for this variable
             context[variable] = overwrite
