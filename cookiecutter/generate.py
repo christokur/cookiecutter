@@ -46,10 +46,12 @@ def is_copy_only_path(path, context):
     return False
 
 
-def apply_overwrites_to_context(context, overwrite_context):
+def apply_overwrites_to_context(context, overwrite_context, add:bool = False):
     """Modify the given context in place based on the overwrite_context."""
     for variable, overwrite in overwrite_context.items():
         if variable not in context:
+            if add:
+                context[variable] = overwrite
             # Do not include variables which are not used in the template
             continue
 
@@ -70,7 +72,10 @@ def apply_overwrites_to_context(context, overwrite_context):
                 )
         elif isinstance(context_value, dict) and isinstance(overwrite, dict):
             # We are dealing with a nested context
-            apply_overwrites_to_context(context[variable], overwrite)
+            if context[variable]:
+                apply_overwrites_to_context(context[variable], overwrite, add=True)
+            else:
+                context[variable] = overwrite
         else:
             # Simply overwrite the value for this variable
             context[variable] = overwrite
