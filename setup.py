@@ -1,10 +1,21 @@
 """cookiecutter distutils configuration."""
+from pathlib import Path
 from setuptools import setup
 
-version = "2.1.2.dev0"
+
+def _get_version() -> str:
+    """Read cookiecutter/VERSION.txt and return its contents."""
+    path = Path("cookiecutter").resolve()
+    version_file = path / "VERSION.txt"
+    return version_file.read_text().strip()
+
+
+version = _get_version()
+
 
 with open('README.md', encoding='utf-8') as readme_file:
     readme = readme_file.read()
+
 
 requirements = [
     'binaryornot>=0.4.4',
@@ -15,6 +26,7 @@ requirements = [
     'python-slugify>=4.0.0',
     'requests>=2.23.0',
     'jsonschema>=3.2.0',
+    'arrow',
 ]
 
 setup(
@@ -30,6 +42,11 @@ setup(
     author='Audrey Feldroy',
     author_email='audreyr@gmail.com',
     url='https://github.com/cookiecutter/cookiecutter',
+    project_urls={
+        "Documentation": "https://cookiecutter.readthedocs.io",
+        "Issues": "https://github.com/cookiecutter/cookiecutter/issues",
+        "Discord": "https://discord.gg/9BrxzPKuEW",
+    },
     packages=['cookiecutter'],
     package_dir={'cookiecutter': 'cookiecutter'},
     entry_points={'console_scripts': ['cookiecutter = cookiecutter.__main__:main']},
@@ -50,6 +67,7 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Programming Language :: Python",
